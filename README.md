@@ -21,22 +21,15 @@ The script configures rsyslog to:
 
 ## Installation Instructions
 
-### 1. Download the Script
+### 
+1. Download the Script
 
-Save the script to a file named `lightbits_logs_redirect.sh`:
-
-```bash
-# Using curl (if you have the script hosted somewhere)
-curl -o lightbits_logs_redirect.sh https://your-script-url.com/lightbits_logs_redirect.sh
-
-# Or copy-paste the script into a new file
-nano lightbits_logs_redirect.sh
-# (paste script content and save)
-Note: This script is designed to run ONLY on RHEL, AlmaLinux, Rocky Linux, or other RHEL-compatible distributions. It will check OS compatibility before proceeding.
 2. Make the Script Executable
-bashchmod +x lightbits_logs_redirect.sh
+chmod +x lightbits_logs_redirect.sh
+
 3. Run the Script with sudo
-bashsudo ./lightbits_logs_redirect.sh
+sudo ./lightbits_logs_redirect.sh
+
 4. Expected Output
 If successful, you should see output similar to:
 Checking operating system compatibility...
