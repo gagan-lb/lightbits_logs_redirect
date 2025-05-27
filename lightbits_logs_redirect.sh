@@ -24,124 +24,97 @@ fi
 
 echo "Setting up Lightbits log redirection..."
 
-# Step 0: Check if rsyslog is installed
+# Check if rsyslog is installed
 if ! command -v rsyslogd &> /dev/null; then
     echo "ERROR: rsyslog is not installed. Please install it first."
     echo "Run: sudo dnf install rsyslog"
     exit 1
 fi
 
-# Step 1: Create rsyslog configuration file with case-insensitive matching
-cat > /etc/rsyslog.d/10-lightbits.conf << 'EOF'
-# Redirect Lightbits logs to /var/log/lightbits.messages
-if $programname contains_i "api-service" or 
-   $programname contains_i "cluster-manager" or 
-   $programname contains_i "discovery-service" or 
-   $programname contains_i "lightbox-exporter" or 
-   $programname contains_i "node-manager" or 
-   $programname contains_i "profile-generator" or 
-   $programname contains_i "upgrade-manager" or 
-   $programname contains_i "etcd" then {
-    action(type="omfile" file="/var/log/lightbits.messages")
-    stop
-}
-EOF
+# Create enhanced rsyslog configuration file with ALL Lightbits services
+printf '%s\n' \
+'# Redirect Lightbits logs to /var/log/lightbits.messages' \
+'# This covers both direct service logs and systemd messages about these services' \
+'if ($programname contains_i "api-service" or' \
+'    $programname contains_i "cluster-manager" or' \
+'    $programname contains_i "discovery-service" or' \
+'    $programname contains_i "lightbox-exporter" or' \
+'    $programname contains_i "node-manager" or' \
+'    $programname contains_i "profile-generator" or' \
+'    $programname contains_i "upgrade-manager" or' \
+'    $programname contains_i "lb_irq_balance" or' \
+'    $programname contains_i "gftl" or' \
+'    $programname contains_i "etcd") or' \
+'   ($programname == "systemd" and' \
+'    ($msg contains_i "api-service" or' \
+'     $msg contains_i "cluster-manager" or' \
+'     $msg contains_i "discovery-service" or' \
+'     $msg contains_i "lightbox-exporter" or' \
+'     $msg contains_i "node-manager" or' \
+'     $msg contains_i "profile-generator" or' \
+'     $msg contains_i "upgrade-manager" or' \
+'     $msg contains_i "lb_irq_balance" or' \
+'     $msg contains_i "gftl" or' \
+'     $msg contains_i "etcd" or' \
+'     $msg contains_i "Clustering API Service" or' \
+'     $msg contains_i "NVMeOF Discovery Service" or' \
+'     $msg contains_i "IRQ Balance Service")) then {' \
+'    action(type="omfile" file="/var/log/lightbits.messages")' \
+'    stop' \
+'}' > /etc/rsyslog.d/10-lightbits.conf
 
-echo "Created rsyslog configuration file with case-insensitive matching"
-
-# Step 2: Create log file with proper permissions
+# Create log file with proper permissions
 touch /var/log/lightbits.messages
-# On RHEL systems, root:root is often used for log files
 chown root:root /var/log/lightbits.messages
 chmod 640 /var/log/lightbits.messages
 
-echo "Created log file with proper permissions"
+# Configure log rotation
+printf '%s\n' \
+'/var/log/lightbits.messages {' \
+'    rotate 7' \
+'    daily' \
+'    missingok' \
+'    notifempty' \
+'    compress' \
+'    delaycompress' \
+'    postrotate' \
+'        /bin/systemctl reload rsyslog.service > /dev/null 2>&1 || true' \
+'    endscript' \
+'}' > /etc/logrotate.d/lightbits
 
-# Step 3: Configure log rotation
-cat > /etc/logrotate.d/lightbits << 'EOF'
-/var/log/lightbits.messages {
-    rotate 7
-    daily
-    missingok
-    notifempty
-    compress
-    delaycompress
-    postrotate
-        /bin/systemctl reload rsyslog.service > /dev/null 2>&1 || true
-    endscript
-}
-EOF
+# Ensure rsyslog is enabled to start on boot
+systemctl enable rsyslog &>/dev/null
 
-echo "Configured log rotation"
-
-# Step 4: Ensure rsyslog is enabled to start on boot
-if ! systemctl is-enabled rsyslog &>/dev/null; then
-    echo "Enabling rsyslog to start automatically at boot"
-    systemctl enable rsyslog
-else
-    echo "Rsyslog is already enabled to start at boot: $(systemctl is-enabled rsyslog)"
-fi
-
-# Verify it's actually enabled
-RSYSLOG_ENABLED=$(systemctl is-enabled rsyslog)
-if [ "$RSYSLOG_ENABLED" != "enabled" ]; then
-    echo "WARNING: Failed to enable rsyslog service. Trying again..."
-    systemctl enable rsyslog
-    
-    # Check one more time
-    RSYSLOG_ENABLED=$(systemctl is-enabled rsyslog)
-    if [ "$RSYSLOG_ENABLED" != "enabled" ]; then
-        echo "ERROR: Could not enable rsyslog to start on boot. Please check your system configuration."
-        exit 1
-    fi
-fi
-
-# Step 5: Validate the new configuration
-echo "Validating rsyslog configuration..."
-if rsyslogd -N1; then
-    echo "Rsyslog configuration is valid"
-else
+# Validate the new configuration
+if ! rsyslogd -N1 &>/dev/null; then
     echo "ERROR: Rsyslog configuration validation failed. Please check the syntax manually."
     exit 1
 fi
 
-# Step 6: Restart rsyslog
+# Restart rsyslog
 systemctl restart rsyslog
 
-# Step 7: Verify rsyslog is running
-if systemctl is-active rsyslog &>/dev/null; then
-    echo "Rsyslog service is running: $(systemctl is-active rsyslog)"
-else
+# Verify rsyslog is running
+if ! systemctl is-active rsyslog &>/dev/null; then
     echo "ERROR: Failed to start rsyslog service. Please check system logs."
     exit 1
 fi
 
-# Step 8: SELinux context for the log file (RHEL systems often use SELinux)
+# SELinux context for the log file
 if command -v restorecon &> /dev/null; then
-    restorecon -v /var/log/lightbits.messages
-    echo "Applied proper SELinux context to log file"
+    restorecon -v /var/log/lightbits.messages &>/dev/null
 fi
 
-# Step 9: Create a simple test log entry
-logger -t "lightbox-exporter" "Test message to validate Lightbits log redirection"
+# Test with actual service names found in logs
+logger -t "systemd" "Started gftl.service test message"
+logger -t "systemd" "Stopping lb_irq_balance.service test message"
 sleep 2
 
-# Check if the test message appears in the log file
-if grep -q "Test message to validate Lightbits log redirection" /var/log/lightbits.messages; then
-    echo "SUCCESS: Log redirection is working correctly!"
+# Check if test messages appear in the log file
+if grep -q "gftl.service\|lb_irq_balance" /var/log/lightbits.messages; then
+    echo "SUCCESS: Lightbits log redirection configured successfully!"
 else
-    echo "WARNING: Test log entry not found in /var/log/lightbits.messages. Please check configuration."
+    echo "WARNING: Test log entries not found. Configuration may need adjustment."
 fi
 
-echo ""
-echo "=== PERSISTENCE VERIFICATION ==="
-echo "The following configurations will ensure persistence across reboots:"
-echo "1. Rsyslog config file: $([ -f /etc/rsyslog.d/10-lightbits.conf ] && echo "✓ Created" || echo "❌ Missing")"
-echo "2. Rsyslog service: $(systemctl is-enabled rsyslog)"
-echo "3. Log rotation config: $([ -f /etc/logrotate.d/lightbits ] && echo "✓ Created" || echo "❌ Missing")"
-echo "4. Log file permissions: $([ -f /var/log/lightbits.messages ] && ls -l /var/log/lightbits.messages || echo "❌ Missing")"
-echo ""
-echo "Configuration complete. Lightbits logs will now be redirected to /var/log/lightbits.messages"
-echo "This configuration will persist across system reboots."
-echo ""
-echo "To verify after reboot, run: grep lightbox-exporter /var/log/lightbits.messages"
+echo "Configuration complete. Lightbits logs will be redirected to /var/log/lightbits.messages"
